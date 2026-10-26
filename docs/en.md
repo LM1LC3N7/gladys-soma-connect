@@ -84,6 +84,9 @@ again. It is refused, or not sent, in these cases only:
 - SOMA Connect cannot be reached, or answers an error, during 3.5 s: unlike a
   stop, a close is then **not** kept nor sent again (not after a restart
   either).
+- A close answered "not sent" or "refused" is never sent afterwards, not even
+  behind the move that was leaving. A move it replaces is told so ("replaced by
+  a close"), not "cancelled by a stop".
 
 ## Reads
 

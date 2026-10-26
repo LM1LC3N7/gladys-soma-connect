@@ -278,3 +278,57 @@ test('M4: follow-ups skipped by a pause never conclude "not reached" on an old r
   assert.doesNotMatch(status().message.en, /did not reach/);
   assert.match(status().message.en, /not confirmed yet/);
 });
+
+test('R2-1: cycles without change write no bridge in /data (the URL form is kept)', async () => {
+  const clock = createClock();
+  const bridge = createBridge(clock);
+  const store = memoryStore();
+  const writes = [];
+  const save = store.save.bind(store);
+  store.save = async (data) => {
+    writes.push(JSON.stringify(data.bridge));
+    return save(data);
+  };
+  await setup({ clock, bridge, store, devices: createdBoth() });
+  await clock.run(2 * MINUTE);
+  const before = writes.length;
+  await clock.run(10 * MINUTE);
+  // (lastAttemptAt is written once a minute; the bridge itself never changes.)
+  const changed = new Set(writes.slice(before - 1));
+  assert.equal(changed.size, 1, [...changed].join(' | '));
+  assert.ok(JSON.parse(writes.at(-1)).style, 'the form is kept');
+});
+
+test('R2-2: a move replaced by a close says so, not "stop"', async () => {
+  const clock = createClock();
+  const bridge = createBridge(clock);
+  const { setValue } = await setup({ clock, bridge, devices: createdBoth() });
+  bridge.latency = 600;
+  const moves = [10, 20].map((p) => setValue(ID_A, 'position', p));
+  await clock.run(100);
+  const close = setValue(ID_A, 'state', -1);
+  await clock.run(10 * SECOND);
+  const [ack, , waiting] = await Promise.all([close, ...moves]);
+  assert.equal(ack.success, true, ack.error);
+  assert.match(waiting.error, /Remplacée par une fermeture/);
+  assert.doesNotMatch(waiting.error, /arrêt/);
+});
+
+test('R2-3: a close said "not sent" is never sent afterwards', async () => {
+  const clock = createClock();
+  const bridge = createBridge(clock);
+  const { setValue } = await setup({ clock, bridge, devices: createdBoth() });
+  bridge.latency = 600;
+  const move = setValue(ID_A, 'position', 10);
+  await clock.run(100);
+  bridge.fail((r) => r?.name === 'set_shade_position' && r.pos === '100', 'unreachable', 1000);
+  const close = setValue(ID_A, 'state', -1);
+  await clock.run(5 * SECOND);
+  const ack = await close;
+  assert.match(ack.error, /Non envoyée/);
+  await move;
+  bridge.failures = [];
+  const sent = bridge.of('set_shade_position').length;
+  await clock.run(30 * SECOND);
+  assert.equal(bridge.of('set_shade_position').length, sent, 'no close goes afterwards');
+});

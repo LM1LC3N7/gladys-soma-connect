@@ -248,6 +248,10 @@ export const ERRORS = {
     en: 'Cancelled by a stop: nothing sent.',
     fr: 'Annulée par un arrêt : rien envoyé.',
   },
+  closed: {
+    en: 'Replaced by a close of this shade: nothing sent.',
+    fr: 'Remplacée par une fermeture de ce store : rien envoyé.',
+  },
   configChanged: {
     en: 'The configuration changed meanwhile: nothing sent.',
     fr: 'La configuration a changé entre-temps : rien envoyé.',

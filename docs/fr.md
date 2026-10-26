@@ -90,6 +90,9 @@ ne part pas, dans ces cas seulement :
 - SOMA Connect est injoignable, ou répond une erreur, pendant 3,5 s :
   contrairement à l'arrêt, la fermeture n'est alors **pas** gardée ni renvoyée
   (pas non plus après un redémarrage).
+- Une fermeture annoncée « non envoyée » ou « refusée » ne part jamais ensuite,
+  pas même derrière le mouvement qui partait. Un mouvement qu'elle remplace
+  reçoit « remplacée par une fermeture », pas « annulée par un arrêt ».
 
 ## Lectures
 

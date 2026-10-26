@@ -34,6 +34,10 @@ the notes of the version's GitHub Release.
 
 ### Fixed
 
+- No more two useless writes to `/data` per read cycle (the URL form is kept, not
+  erased then written again).
+- A move replaced by a close is told so, not "cancelled by a stop"; a close
+  answered "not sent" or "refused" is never sent afterwards.
 - A move started from the SOMA app or a remote after a stop is no longer
   stopped by Gladys: only the reads 2 and 5 s after a stop check it.
 - An error 5xx on one shade no longer pauses the moves of all the shades; a

@@ -631,7 +631,8 @@ export class SomaApp {
     }
     const m = this.memory;
     const before = JSON.stringify([m.bridge, m.shades, m.pause]);
-    m.bridge = { address: this.config.key, version: this.version };
+    // The URL form is kept as it is: only saveStyle changes it (one write, not two).
+    m.bridge = { address: this.config.key, version: this.version, style: m.bridge?.style };
     m.shades = [...this.shades.values()]
       .filter((s) => s.listed)
       .map((s) => ({ mac: s.mac, kind: s.kind }));
@@ -1307,8 +1308,11 @@ export class SomaApp {
   /** The checks of a move: on arrival in the lane and right before its first byte. */
   checkMove(shade, ticket, sendBy) {
     const mono = this.monotonic();
-    if (ticket.cancelled || ticket.seq < shade.stopSeq) {
+    if (ticket.seq < shade.stopSeq) {
       throw this.refusal(ERRORS.stopped);
+    }
+    if (ticket.cancelled) {
+      throw this.refusal(ticket.cancelled === 'close' ? ERRORS.closed : ERRORS.stopped);
     }
     if (ticket.generation !== this.generation) {
       throw this.refusal(ERRORS.configChanged);
@@ -1663,7 +1667,7 @@ export class SomaApp {
       throw this.refusal(ERRORS.noAddress);
     }
     for (const pending of shade.tickets) {
-      pending.cancelled = true;
+      pending.cancelled = 'close';
     }
     this.commandSeq += 1;
     const ticket = {
@@ -1674,7 +1678,10 @@ export class SomaApp {
     const leaving = shade.inFlight;
     const before = shade.position;
     const result = await this.sendClose(shade, ticket, address, received);
-    if (leaving) {
+    // Said "not sent" or "refused" to Gladys: never sent afterwards. Only a close
+    // that did go (or may have) is followed by a new one.
+    const mayHaveGone = result.ok === true || (result.err?.sent && !result.err?.answered);
+    if (leaving && mayHaveGone) {
       // A move was leaving: once it is answered, close again (unless newer).
       Promise.resolve(leaving)
         .catch(() => {})

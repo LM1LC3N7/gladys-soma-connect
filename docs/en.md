@@ -33,7 +33,7 @@ Control your **SOMA Smart Shades** (roller shade motors) and **SOMA Tilt**
 
 ## Commands
 
-- **Open, close and position** go to SOMA Connect within 3.5 s of your click,
+- **Open and position** go to SOMA Connect within 3.5 s of your click,
   or are refused with nothing sent. Each shade takes its moves one at a time
   (4 waiting at most); different shades move side by side, so a scene can move
   all your shades at once.
@@ -62,11 +62,28 @@ A stop is refused, or not sent, in these cases only:
   meanwhile (that move is what you asked last);
 - SOMA Connect cannot be reached, or answers an error, during 3.5 s (tried
   every 250 ms): the stop is then **kept** (also in `/data`) and sent again
-  with the next reads (at least once a minute), 3 times at most; the status
-  and the badge say so, and say when it is given up.
+  once a minute (with or without the configuration of Gladys, to the address
+  kept in `/data`), 3 times at most; the status and the badge say so, and say
+  when it is given up.
 
-When the reads after a stop show the shade still moving, the stop is sent
-again (3 times at most).
+When the reads 2 and 5 s after a stop show the shade still going the way it
+went, the stop is sent again (3 times at most). Later reads never send a stop:
+a move started from the SOMA app or a remote after a stop is left alone.
+
+### Close
+
+**Close** (and the position 0 %) is protective too: no queue (it replaces the
+moves of that shade still waiting), no option, through a pause, before the
+configuration of Gladys is read (address and shade kept in `/data`), tried
+every 250 ms within 3.5 s; a move that was leaving is followed by the close
+again. It is refused, or not sent, in these cases only:
+
+- the shade is unknown to the integration, or no address of SOMA Connect is
+  typed nor kept;
+- a stop, or a move accepted by SOMA Connect, asked **after** it;
+- SOMA Connect cannot be reached, or answers an error, during 3.5 s: unlike a
+  stop, a close is then **not** kept nor sent again (not after a restart
+  either).
 
 ## Reads
 
@@ -76,9 +93,14 @@ again (3 times at most).
 - A shade out of Bluetooth reach of SOMA Connect is shown "not read" and its
   badge unreachable; the others go on.
 - SOMA Connect unreachable: tried again after 30 s, 1, 2 then 5 min (never
-  sooner than the interval). A "too many requests" (HTTP 429) or an error 5xx
-  pauses the reads and the moves (1 min to 6 h, kept in `/data`); the pause
-  does not hold a stop.
+  sooner than the interval). A "too many requests" (HTTP 429), or an error 5xx
+  on the list of devices, pauses the moves (what Retry-After asks, 1 min to
+  6 h; else 1 to 5 min; kept in `/data`) and the reads (never sooner than the
+  interval anyway); the pause does not hold a stop nor a close. An error 5xx
+  on one shade only marks that shade "not read".
+- The URL form follows pysoma (`?mac=` for firmware 3, `/<mac>` otherwise);
+  after a 404 the other form is tried at once, and the form that answered is
+  kept for the next requests.
 - A position is published only while it is recent; nothing old is published
   again as new.
 
@@ -88,5 +110,5 @@ again (3 times at most).
 - The light level of the solar panel is not read yet (its unit is not known).
 - The type of a device (shade or Tilt) changed in SOMA Connect applies after a
   **Scan** in the Discovery tab.
-- Never tested with a real SOMA Connect: the URL form of firmware 3 and later,
-  the answers and the time SOMA Connect takes to answer are to be checked.
+- Never tested with a real SOMA Connect: the URL forms, the answers and the
+  time SOMA Connect takes to answer are to be checked.

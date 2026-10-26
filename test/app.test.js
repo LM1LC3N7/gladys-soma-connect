@@ -46,7 +46,7 @@ test('discovery: one shutter per device of SOMA Connect, position and battery', 
   // Old firmware: the path form.
   assert.equal(bridge.of('get_shade_state')[0].path, `/get_shade_state/${MAC_A}`);
   // /data: the address, the firmware and the shades (a stop needs no read).
-  assert.deepEqual(store.data.bridge, { address: KEY, version: '2.3.1' });
+  assert.deepEqual(store.data.bridge, { address: KEY, version: '2.3.1', style: 'path' });
   assert.deepEqual(
     store.data.shades.map((s) => [s.mac, s.kind]),
     [

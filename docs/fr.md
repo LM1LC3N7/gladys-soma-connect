@@ -35,7 +35,7 @@ votre pont **SOMA Connect**.
 
 ## Commandes
 
-- **Ouvrir, fermer et la position** partent vers SOMA Connect dans les 3,5 s
+- **Ouvrir et la position** partent vers SOMA Connect dans les 3,5 s
   de votre clic, ou sont refusées sans rien envoyer. Chaque store prend ses
   mouvements un par un (4 en attente au plus) ; des stores différents bougent
   côte à côte, une scène peut donc bouger tous vos stores d'un coup.
@@ -66,11 +66,30 @@ Un arrêt est refusé, ou ne part pas, dans ces cas seulement :
   Connect entre-temps (c'est ce mouvement que vous avez demandé en dernier) ;
 - SOMA Connect est injoignable, ou répond une erreur, pendant 3,5 s (essai
   toutes les 250 ms) : l'arrêt est alors **gardé** (aussi dans `/data`) et
-  renvoyé avec les lectures suivantes (au moins une fois par minute), 3 fois
-  au plus ; le statut et le badge le disent, et disent quand il est abandonné.
+  renvoyé une fois par minute (avec ou sans la configuration de Gladys, à
+  l'adresse gardée dans `/data`), 3 fois au plus ; le statut et le badge le
+  disent, et disent quand il est abandonné.
 
-Si les lectures après un arrêt montrent que le store bouge encore, l'arrêt
-est renvoyé (3 fois au plus).
+Si les lectures de 2 et 5 s après un arrêt montrent que le store continue
+dans le même sens, l'arrêt est renvoyé (3 fois au plus). Les lectures
+suivantes ne renvoient pas d'arrêt : un mouvement lancé depuis l'application
+SOMA ou une télécommande après un arrêt est laissé tel quel.
+
+### Fermeture
+
+La **fermeture** (et la position 0 %) est aussi protectrice : aucune file
+(elle remplace les mouvements de ce store encore en attente), aucune option,
+à travers une pause, avant la lecture de la configuration de Gladys (adresse
+et store gardés dans `/data`), essai toutes les 250 ms pendant 3,5 s ; un
+mouvement qui partait est suivi d'une nouvelle fermeture. Elle est refusée, ou
+ne part pas, dans ces cas seulement :
+
+- le store est inconnu de l'intégration, ou aucune adresse de SOMA Connect
+  n'est saisie ni gardée ;
+- un arrêt, ou un mouvement accepté par SOMA Connect, demandé **après** elle ;
+- SOMA Connect est injoignable, ou répond une erreur, pendant 3,5 s :
+  contrairement à l'arrêt, la fermeture n'est alors **pas** gardée ni renvoyée
+  (pas non plus après un redémarrage).
 
 ## Lectures
 
@@ -81,9 +100,15 @@ est renvoyé (3 fois au plus).
 - Un store hors de portée Bluetooth de SOMA Connect est affiché « non lu » et
   son badge injoignable ; les autres continuent.
 - SOMA Connect injoignable : nouvel essai après 30 s, 1, 2 puis 5 min (pas
-  plus souvent que l'intervalle). Un « trop de demandes » (HTTP 429) ou une
-  erreur 5xx met en pause les lectures et les mouvements (de 1 min à 6 h,
-  gardée dans `/data`) ; la pause ne retient pas l'arrêt.
+  plus souvent que l'intervalle). Un « trop de demandes » (HTTP 429), ou une
+  erreur 5xx sur la liste des appareils, met en pause les mouvements (ce que
+  demande Retry-After, de 1 min à 6 h ; sinon de 1 à 5 min ; gardée dans
+  `/data`) et les lectures (jamais avant l'intervalle de toute façon) ; la
+  pause ne retient ni l'arrêt ni la fermeture. Une erreur 5xx sur un seul
+  store marque seulement ce store « non lu ».
+- La forme des adresses suit pysoma (`?mac=` pour le micrologiciel 3, `/<mac>`
+  sinon) ; après un 404 l'autre forme est essayée aussitôt, et celle qui a
+  répondu est gardée pour les demandes suivantes.
 - Une position n'est publiée que tant qu'elle est récente ; rien d'ancien
   n'est republié comme neuf.
 
@@ -94,6 +119,5 @@ est renvoyé (3 fois au plus).
   pas connue).
 - Le type d'un appareil (store ou Tilt) changé dans SOMA Connect s'applique
   après un **Scan** dans l'onglet Découverte.
-- Jamais testée avec un vrai SOMA Connect : la forme des adresses du
-  micrologiciel 3 et suivants, les réponses et le temps de réponse de SOMA
-  Connect restent à vérifier.
+- Jamais testée avec un vrai SOMA Connect : la forme des adresses, les
+  réponses et le temps de réponse de SOMA Connect restent à vérifier.

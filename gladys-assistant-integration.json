@@ -10,7 +10,7 @@
   "docker_image": "ghcr.io/lm1lc3n7/gladys-soma-connect:0.1.0",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-soma-connect/main/cover.png",
-  "categories": ["appliances"],
+  "categories": ["lighting"],
   "transports": ["local"],
   "config_schema": [
     {

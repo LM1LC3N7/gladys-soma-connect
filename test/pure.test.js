@@ -27,7 +27,8 @@ test('positions: Gladys 100 = open; SOMA 0 = open; a tilt either way; bounds', (
   assert.equal(positionOf({ position: '30' }, 'shade'), 70);
   assert.equal(positionOf({ position: 101 }, 'shade'), undefined);
   assert.equal(positionOf({ position: -5 }, 'shade'), undefined);
-  assert.equal(positionOf({ position: 30.5 }, 'shade'), undefined);
+  assert.equal(positionOf({ position: 30.4 }, 'shade'), 70);
+  assert.equal(positionOf({ position: '30.6' }, 'shade'), 69);
   assert.equal(positionOf({ position: '' }, 'shade'), undefined);
   assert.equal(positionOf({ position: null }, 'shade'), undefined);
   assert.equal(positionOf({}, 'shade'), undefined);
@@ -92,9 +93,10 @@ test('list_devices: MAC rule, kinds, duplicates, junk and the limit of 32', () =
   assert.equal(versionOf({ version: 'v3' }), undefined);
 });
 
-test('URL forms: query from firmware 3, path before; MAC checked', () => {
+test('URL forms: query for firmware 3, path otherwise (pysoma); MAC checked', () => {
   assert.equal(styleOf('3.0.12'), 'query');
-  assert.equal(styleOf('4.1'), 'query');
+  // The rule of pysoma: the query form for a major version of exactly 3.
+  assert.equal(styleOf('4.1'), 'path');
   assert.equal(styleOf('2.2.6'), 'path');
   assert.equal(styleOf(undefined), undefined);
   assert.equal(styleOf('abc'), undefined);

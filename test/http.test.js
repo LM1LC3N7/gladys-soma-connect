@@ -43,7 +43,7 @@ const ok = (res, body = { result: 'success' }) => {
   res.end(JSON.stringify(body));
 };
 
-test('the path form, then the query form after a 404, within one deadline', async () => {
+test('the other URL form after a 404, within one deadline; the form that answered kept', async () => {
   const s = await serve((req, res) => {
     if (req.url.startsWith('/stop_shade?mac=')) return ok(res);
     res.writeHead(404);
@@ -53,12 +53,16 @@ test('the path form, then the query form after a 404, within one deadline', asyn
     const client = new SomaClient();
     await client.stop(s.address, MAC, undefined, { timeout: 2000 });
     assert.deepEqual(s.seen, [`/stop_shade/${MAC}`, `/stop_shade?mac=${MAC}`]);
+    // The form that answered is kept: tried first from then on, whatever the
+    // firmware says (a firmware 4 that kept the query form).
     s.seen.length = 0;
-    await assert.rejects(client.stop(s.address, MAC, 'path', { timeout: 2000 }), {
-      kind: 'notFound',
-      answered: true,
-    });
-    assert.deepEqual(s.seen, [`/stop_shade/${MAC}`]);
+    await client.stop(s.address, MAC, 'path', { timeout: 2000 });
+    assert.deepEqual(s.seen, [`/stop_shade?mac=${MAC}`]);
+    // The form of the firmware wrong and nothing learned yet: the other one after the 404.
+    const fresh = new SomaClient();
+    s.seen.length = 0;
+    await fresh.stop(s.address, MAC, 'path', { timeout: 2000 });
+    assert.deepEqual(s.seen, [`/stop_shade/${MAC}`, `/stop_shade?mac=${MAC}`]);
   } finally {
     await s.close();
   }

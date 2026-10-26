@@ -23,14 +23,21 @@ export const STYLES = { QUERY: 'query', PATH: 'path' };
 const RAW_MAC = /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$|^[0-9a-f]{12}$/i;
 export const isRawMac = (value) => typeof value === 'string' && RAW_MAC.test(value);
 
-/** The URL form of a firmware version ("3.0.12" -> 'query'), or undefined when unknown. */
+/**
+ * The URL form tried first for a firmware version, by the rule of pysoma:
+ * the query form for a major version of exactly 3 ("3.0.12"), the path form
+ * for any other one; undefined when the version is unreadable. The other form
+ * is tried after a 404 in every case.
+ */
 export function styleOf(version) {
   const major = /^(\d{1,4})(?:\.\d{1,6}){0,4}$/.exec(version ?? '')?.[1];
   if (major === undefined) {
     return undefined;
   }
-  return Number(major) >= 3 ? STYLES.QUERY : STYLES.PATH;
+  return Number(major) === 3 ? STYLES.QUERY : STYLES.PATH;
 }
+
+const otherStyle = (style) => (style === STYLES.QUERY ? STYLES.PATH : STYLES.QUERY);
 
 /** The URL of a request for one shade. */
 export function urlOf(base, mac, style, pos) {
@@ -92,17 +99,54 @@ export function apiPosition(value) {
 
 export class SomaClient {
   /**
-   * @param {{ request?: typeof httpGet, now?: () => number }} [options]
-   *   `request` is replaced in the tests (never the network).
+   * @param {{ request?: typeof httpGet, now?: () => number, monotonic?: () => number }} [options]
+   *   `request` is replaced in the tests (never the network); `now` (wall
+   *   clock) only reads a Retry-After date, `monotonic` measures the time spent.
    */
-  constructor({ request = httpGet, now = Date.now } = {}) {
+  constructor({
+    request = httpGet,
+    now = Date.now,
+    monotonic = () => performance.now(),
+    readsAtOnce = LIMITS.readsAtOnce,
+  } = {}) {
     this.request = request;
     this.now = now;
+    this.monotonic = monotonic;
     /** The reads running (their handles): a stop may cut a silent one. */
     this.reads = new Set();
+    /** The URL form that last answered (tried first), or undefined. */
+    this.style = undefined;
+    /** Reads of SOMA Connect at once, follow-ups included (commands and stops never wait). */
+    this.readSlots = readsAtOnce;
+    this.readQueue = [];
   }
 
-  async call(address, path, { timeout, sendWithin, beforeSend, read = false }) {
+  /** Runs a read when one of the read slots is free. */
+  async throttled(task) {
+    if (this.readSlots <= 0) {
+      await new Promise((resolve) => this.readQueue.push(resolve));
+    } else {
+      this.readSlots -= 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = this.readQueue.shift();
+      if (next) {
+        next();
+      } else {
+        this.readSlots += 1;
+      }
+    }
+  }
+
+  async call(address, path, options) {
+    return options.read
+      ? this.throttled(() => this.callNow(address, path, options))
+      : this.callNow(address, path, options);
+  }
+
+  async callNow(address, path, { timeout, sendWithin, beforeSend, read = false }) {
     const res = await this.request({
       host: address.host,
       port: address.port,
@@ -122,21 +166,25 @@ export class SomaClient {
   }
 
   /**
-   * A request for one shade, in the URL form of the firmware; unknown: the
-   * path form, then the query form after a 404 (nothing done), within the
-   * same deadline.
+   * A request for one shade: first in the form that last answered, else the
+   * form of the firmware (`style`, the rule of pysoma), else the path form;
+   * after a 404 (nothing done) the other form, within the same deadline. The
+   * form that answers is kept and tried first from then on.
    */
   async forShade(address, base, mac, style, pos, options) {
-    const styles = style ? [style] : [STYLES.PATH, STYLES.QUERY];
-    const startedAt = this.now();
+    const first = this.style ?? style ?? STYLES.PATH;
+    const styles = [first, otherStyle(first)];
+    const startedAt = this.monotonic();
     for (let i = 0; ; i += 1) {
-      const spent = this.now() - startedAt;
+      const spent = this.monotonic() - startedAt;
       try {
-        return await this.call(address, urlOf(base, mac, styles[i], pos), {
+        const answer = await this.call(address, urlOf(base, mac, styles[i], pos), {
           ...options,
           timeout: options.timeout - spent,
           sendWithin: options.sendWithin === undefined ? undefined : options.sendWithin - spent,
         });
+        this.style = styles[i];
+        return answer;
       } catch (err) {
         if (err?.kind !== 'notFound' || i + 1 >= styles.length) {
           throw err;

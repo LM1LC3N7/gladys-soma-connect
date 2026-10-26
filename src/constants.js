@@ -89,6 +89,12 @@ export const TIMINGS = {
   /** Bounds of the pause after a 429 or a 5xx (Retry-After, or doubled from the min). */
   pauseMin: MINUTE,
   pauseMax: 6 * HOUR,
+  /** Without Retry-After, a pause doubles from 1 min up to this (the moves wait for it). */
+  pauseNoRetryAfter: 5 * MINUTE,
+  /** A list_devices cut to give the way to a stop is asked again this long after. */
+  cutRetry: 3 * SECOND,
+  /** After a stop, the reads of this window (the follow-ups of 2 and 5 s) check it. */
+  stopWatchFor: 10 * SECOND,
   /**
    * Gladys acks a set_value within 5 s: a command not sent within 3.5 s of
    * its arrival is refused, never sent late; its answer is awaited until 4.3 s.

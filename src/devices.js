@@ -87,13 +87,16 @@ export function shadesOf(json) {
   return { shades: out, duplicates, dropped, skipped };
 }
 
-/** A whole number of SOMA Connect (a number, or the digits of one), or undefined. */
+/**
+ * A position of SOMA Connect: a finite number (or the text of one), rounded
+ * as Home Assistant does with int(); undefined otherwise.
+ */
 function integerOf(value) {
   if (typeof value === 'number') {
-    return Number.isInteger(value) ? value : undefined;
+    return Number.isFinite(value) ? Math.round(value) : undefined;
   }
-  if (typeof value === 'string' && /^-?\d{1,4}$/.test(value)) {
-    return Number(value);
+  if (typeof value === 'string' && /^-?\d{1,4}(\.\d{1,6})?$/.test(value)) {
+    return Math.round(Number(value));
   }
   return undefined;
 }

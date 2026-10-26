@@ -2,11 +2,11 @@
 // What must survive a restart, in /data (the only writable place of the
 // container), so that a restart never asks SOMA Connect again before its
 // time, and so that "Stop" works before the first read:
-//   - `bridge`: the address of SOMA Connect last read and its firmware
-//     version (the URL form of the commands);
+//   - `bridge`: the address of SOMA Connect last read, its firmware version
+//     and the URL form that last answered (tried first);
 //   - `shades`: the MAC address and the kind (shade, tilt) of each device it
 //     listed, so a stop (and a move) needs no read first;
-//   - `pause`: the end of a pause asked by SOMA Connect (429, 5xx);
+//   - `pause`: the end of a pause (a 429, or a 5xx of list_devices) and its kind;
 //   - `lastAttemptAt`: when SOMA Connect was last read (written at most once
 //     a minute: src/app.js waits that minute more after a restart);
 //   - `batteryAt`: per shade, when its battery was last read (at most once an
@@ -116,6 +116,7 @@ export function normalizeMemory(raw, now) {
               typeof bridge.version === 'string' && styleOf(bridge.version)
                 ? bridge.version
                 : undefined,
+            style: bridge.style === 'query' || bridge.style === 'path' ? bridge.style : undefined,
           }
         : undefined,
     shades,
@@ -127,6 +128,7 @@ export function normalizeMemory(raw, now) {
             failures: Number.isInteger(pause.failures)
               ? Math.min(Math.max(1, pause.failures), 20)
               : 1,
+            kind: pause.kind === 'rate' ? 'rate' : 'server',
           }
         : undefined,
     batteryAt,

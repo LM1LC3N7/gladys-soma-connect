@@ -60,8 +60,9 @@ test/                             node --test: SDK fake Gladys, fake SOMA Connec
   again in `src/soma/client.js`).
 - STOP is not put behind anything: no lane, no read, no option, through a pause
   and a backoff, before the first read (from /data); it cancels the moves not
-  sent yet; retried within its 3.5 s, kept and resent by the next reads (3 at
-  most), resent when the reads contradict it. The docs list its refusal cases
+  sent yet; retried within its 3.5 s, kept and resent once a minute by its own
+  timer (3 at most), resent when the reads of 2 and 5 s contradict it. CLOSE
+  goes the same way but is never kept. The docs list its refusal cases
   exactly: keep them true when changing the code.
 - One reading of the clock per decision (`dueAt(mono)`), pacing on the
   monotonic clock; the tests use a clock that moves at every read, plus

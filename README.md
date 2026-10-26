@@ -26,9 +26,10 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (SomaApp) ⇄ src/soma/client.
 
 - **Protocol** (pysoma, MIT, by the maker): `list_devices`, `get_shade_state`,
   `get_battery_level`, `set_shade_position`, `stop_shade`, as GET requests
-  answered in JSON (`result: "success"`). Firmware 3 and later take
-  `?mac=<mac>&pos=<pos>`, older ones `/<mac>/<pos>`; unknown firmware: the
-  path form, then the query form after a 404 (nothing done).
+  answered in JSON (`result: "success"`). As pysoma, firmware 3 takes
+  `?mac=<mac>&pos=<pos>` and the others `/<mac>/<pos>`; after a 404 (nothing
+  done) the other form is tried in every case, and the form that answered is
+  kept (in `/data` too) and tried first.
 - **Devices**: one `shutter` per device (`state` write-only, `position` 0 closed
   .. 100 open, `battery` %), never a `switch`. Shade: Gladys = 100 − SOMA; Tilt:
   Gladys = 100 − |SOMA| (closed upwards reads as closed); a command is always
@@ -43,10 +44,12 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (SomaApp) ⇄ src/soma/client.
   and status). STOP takes no lane, needs no read, goes through a pause and a
   backoff, works before the first read (from `/data`), cancels the moves not
   sent yet, cuts a read silent for 1 s (its connection closed first), is tried
-  again every 250 ms within 3.5 s, then kept in `/data` and sent again with the
-  next reads (3 times at most), unless a newer move was accepted; a stop the
-  reads contradict is sent again (3 times at most); a move that was leaving is
-  followed by a second stop.
+  again every 250 ms within 3.5 s, then kept in `/data` and sent again once a
+  minute by its own timer (also while the configuration of Gladys cannot be
+  read), 3 times at most, unless a newer move was accepted; a stop the reads
+  of 2 and 5 s contradict (still going the same way) is sent again (3 times at
+  most), never on a later read; a move that was leaving is followed by a second
+  stop. CLOSE (and position 0) is protective too, but never kept nor resent.
 - **Reads**: `list_devices` then each shade (4 at a time) every interval (60 s
   by default, 30 to 3600 s), the battery at most once an hour; never sooner
   than the interval otherwise (Test button, scan, reconnection, unchanged

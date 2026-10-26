@@ -170,9 +170,13 @@ export const T = {
     en: `${address} does not answer like SOMA Connect (${reason.en}); tried again in ${wait}. Check the address and the port (3000).`,
     fr: `${address} ne répond pas comme SOMA Connect (${reason.fr}) ; nouvel essai dans ${wait}. Vérifiez l'adresse et le port (3000).`,
   }),
-  paused: (address, reason, wait) => ({
-    en: `SOMA Connect (${address}): asked to slow down (${reason.en}), paused for ${wait}. The pause does not hold a stop.`,
-    fr: `SOMA Connect (${address}) : demande de ralentir (${reason.fr}), en pause pour ${wait}. La pause ne retient pas l'arrêt.`,
+  paused: (address, wait) => ({
+    en: `SOMA Connect (${address}): asked to slow down (HTTP 429), moves paused for ${wait}. The pause does not hold a stop nor a close.`,
+    fr: `SOMA Connect (${address}) : demande de ralentir (HTTP 429), mouvements en pause pour ${wait}. La pause ne retient ni l'arrêt ni la fermeture.`,
+  }),
+  bridgeError: (address, reason, wait) => ({
+    en: `SOMA Connect (${address}): error of the bridge (${reason.en}), moves paused for ${wait}. The pause does not hold a stop nor a close.`,
+    fr: `SOMA Connect (${address}) : erreur du pont (${reason.fr}), mouvements en pause pour ${wait}. La pause ne retient ni l'arrêt ni la fermeture.`,
   }),
   noDevices: {
     en: 'SOMA Connect lists no shade: pair them in the SOMA app first.',
@@ -253,9 +257,17 @@ export const ERRORS = {
     fr: `${n} commandes de ce store attendent déjà : rien envoyé.`,
   }),
   paused: (wait) => ({
-    en: `SOMA Connect asked to slow down: paused for ${wait} more, nothing sent (the pause does not hold a stop).`,
-    fr: `SOMA Connect a demandé de ralentir : en pause encore ${wait}, rien envoyé (la pause ne retient pas l'arrêt).`,
+    en: `SOMA Connect asked to slow down (HTTP 429): moves paused for ${wait} more, nothing sent (a stop or a close still goes).`,
+    fr: `SOMA Connect a demandé de ralentir (HTTP 429) : mouvements en pause encore ${wait}, rien envoyé (l'arrêt et la fermeture passent).`,
   }),
+  bridgeError: (wait) => ({
+    en: `SOMA Connect answered an error to the list of devices: moves paused for ${wait} more, nothing sent (a stop or a close still goes).`,
+    fr: `SOMA Connect a répondu une erreur à la liste des appareils : mouvements en pause encore ${wait}, rien envoyé (l'arrêt et la fermeture passent).`,
+  }),
+  superseded: {
+    en: 'A newer command of this shade went first: nothing sent.',
+    fr: 'Une commande plus récente de ce store est passée avant : rien envoyé.',
+  },
   tooSlow: {
     en: 'SOMA Connect could not be reached in time: nothing sent.',
     fr: "SOMA Connect n'a pas pu être joint à temps : rien envoyé.",

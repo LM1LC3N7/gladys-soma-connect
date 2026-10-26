@@ -48,7 +48,11 @@ export async function setup({
   const app = new SomaApp({
     gladys,
     logger,
-    client: new SomaClient({ request: fakeBridge.request, now: clock.now }),
+    client: new SomaClient({
+      request: fakeBridge.request,
+      now: clock.now,
+      monotonic: clock.monotonic,
+    }),
     store,
     now: clock.now,
     monotonic: clock.monotonic,

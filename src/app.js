@@ -168,6 +168,10 @@ export class SomaApp {
     this.lastStopRound = undefined;
     this.listNotes = { duplicates: 0, dropped: 0 };
     this.timer = undefined;
+    /** The timer of the stops kept (independent of the configuration and of the reads). */
+    this.stopTimer = undefined;
+    this.stopping = undefined;
+    this.closed = false;
     this.busy = undefined;
     this.configRetry = { timer: undefined, failures: 0, wait: undefined };
     this.commandSeq = 0;
@@ -201,11 +205,12 @@ export class SomaApp {
       this.lastAttemptAt = Math.min(mono, toMono(m.lastAttemptAt) + TIMINGS.attemptPersistEvery);
     }
     if (m.pause) {
-      this.pause = { due: toMono(m.pause.until), failures: m.pause.failures };
+      this.pause = { due: toMono(m.pause.until), failures: m.pause.failures, kind: m.pause.kind };
     }
     if (m.bridge) {
       this.address = parseHost(m.bridge.address).address;
       this.version = m.bridge.version;
+      this.client.style = m.bridge.style;
     }
     for (const kept of m.shades) {
       const shade = freshShade(kept);
@@ -230,6 +235,8 @@ export class SomaApp {
    */
   async connected(getConfig) {
     await this.loadMemory();
+    // The stops kept leave now, whatever becomes of the configuration.
+    this.scheduleStops();
     if (this.started && this.loaded) {
       this.published = undefined;
       this.badges = undefined;
@@ -348,6 +355,11 @@ export class SomaApp {
 
   async stop() {
     this.halt();
+    this.closed = true;
+    if (this.stopTimer !== undefined) {
+      this.timers.clearTimeout(this.stopTimer);
+      this.stopTimer = undefined;
+    }
     this.clearConfigRetry();
     await this.saveAttempt(true);
   }
@@ -417,26 +429,56 @@ export class SomaApp {
   }
 
   /**
-   * When the stops kept are sent again: with the reads, at least once a
-   * minute, through a pause or a backoff; at once after a restart.
+   * When the stops kept are sent again: once a minute, through a pause or a
+   * backoff, with or without the configuration (the address kept in /data);
+   * at once after a restart.
    */
   stopsDueAt(mono) {
-    return this.lastStopRound === undefined
-      ? mono
-      : this.lastStopRound + Math.min(this.interval, MINUTE);
+    return this.lastStopRound === undefined ? mono : this.lastStopRound + MINUTE;
   }
 
-  /** One timer: the next read, or the next resend of a stop kept, when due. */
+  /** The timer of the stops kept: its own, armed from /data at the start. */
+  scheduleStops() {
+    if (this.stopTimer !== undefined) {
+      this.timers.clearTimeout(this.stopTimer);
+      this.stopTimer = undefined;
+    }
+    if (this.closed || !this.hasPendingStops()) {
+      return;
+    }
+    const mono = this.monotonic();
+    this.stopTimer = this.timers.setTimeout(
+      () => {
+        this.stopTimer = undefined;
+        this.runStops()
+          .catch(() => this.logger.error('Sending the stops kept failed'))
+          .finally(() => this.scheduleStops());
+      },
+      Math.max(0, this.stopsDueAt(mono) - mono),
+    );
+  }
+
+  /** One round of the stops kept, never two at once. */
+  runStops() {
+    if (!this.stopping) {
+      this.lastStopRound = this.monotonic();
+      this.stopping = this.resendStops()
+        .then(() => this.publishAll())
+        .finally(() => {
+          this.stopping = undefined;
+        });
+    }
+    return this.stopping;
+  }
+
+  /** One timer: the next read, when due. */
   schedule() {
     this.clearTimer();
     if (!this.loaded || !this.config.address) {
       return;
     }
     const mono = this.monotonic();
-    let at = this.dueAt(mono);
-    if (this.hasPendingStops()) {
-      at = Math.min(at, this.stopsDueAt(mono));
-    }
+    const at = this.dueAt(mono);
     const generation = this.generation;
     this.timer = this.timers.setTimeout(
       () => {
@@ -478,12 +520,6 @@ export class SomaApp {
     }
     const gone = () => generation !== this.generation;
     const mono = this.monotonic();
-    // The stops kept go first, through a pause or a backoff.
-    if (this.hasPendingStops() && mono >= this.stopsDueAt(mono)) {
-      this.lastStopRound = mono;
-      await this.resendStops(generation);
-      if (gone()) return;
-    }
     if (this.pauseLeft(mono) > 0 || (!force && mono < this.dueAt(mono))) {
       await this.publishAll();
       return;
@@ -497,6 +533,12 @@ export class SomaApp {
       json = await this.client.listDevices(address, { timeout: TIMINGS.readTimeout });
     } catch (err) {
       if (gone()) return;
+      if (err?.kind === 'cut') {
+        // Cut to give the way to a stop: not a failure of SOMA Connect. Read
+        // again in a few seconds (the read did not happen).
+        this.lastAttemptAt = this.monotonic() - this.interval + TIMINGS.cutRetry;
+        return;
+      }
       await this.bridgeFailed(err);
       await this.publishAll();
       return;
@@ -506,16 +548,22 @@ export class SomaApp {
     if (gone()) return;
     // Different shades answer independently: a few at a time.
     const listed = [...this.shades.values()].filter((s) => s.listed === true);
-    for (let i = 0; i < listed.length; i += LIMITS.readsAtOnce) {
-      await Promise.all(
-        listed.slice(i, i + LIMITS.readsAtOnce).map((s) => this.readShade(s, generation, true)),
-      );
-      if (gone()) return;
-    }
+    await Promise.all(listed.map((s) => this.readShade(s, generation, { withBattery: true })));
+    if (gone()) return;
+    await this.saveStyle();
     await this.publishAll();
   }
 
-  /** list_devices failed: a pause (429, 5xx) or a backoff, never sooner than the interval. */
+  /** The URL form that answered, kept in /data (tried first after a restart). */
+  async saveStyle() {
+    const bridge = this.memory.bridge;
+    if (bridge && this.client.style && bridge.style !== this.client.style) {
+      bridge.style = this.client.style;
+      await this.saveMemory();
+    }
+  }
+
+  /** list_devices failed: a pause (429, 5xx of the list) or a backoff, never sooner than the interval. */
   async bridgeFailed(err) {
     this.bridge.online = false;
     this.bridge.error = err?.kind ?? 'error';
@@ -534,16 +582,21 @@ export class SomaApp {
     this.logger.warn(`SOMA Connect: ${this.bridge.reason.en}; next try in ${age(wait)}`);
   }
 
-  /** 429 or 5xx: every read and every move waits (a stop never), kept in /data. */
+  /**
+   * A 429 (any request) or a 5xx of list_devices: the moves wait (a stop and
+   * a close never) for what Retry-After asks (1 min to 6 h), else 1, 2, 4, then
+   * 5 min; the reads wait for that and never come sooner than the interval
+   * anyway (dueAt). Kept in /data.
+   */
   async startPause(err) {
     const failures = (this.pause?.failures ?? this.memory.pause?.failures ?? 0) + 1;
-    const asked = err.retryAfter ?? TIMINGS.pauseMin * 2 ** Math.min(failures - 1, 10);
-    const wait = Math.min(
-      TIMINGS.pauseMax,
-      Math.max(TIMINGS.pauseMin, this.interval, Math.min(asked, TIMINGS.pauseMax)),
-    );
-    this.pause = { due: this.monotonic() + wait, failures };
-    this.memory.pause = { until: this.now() + wait, failures };
+    const wait =
+      err.retryAfter !== undefined
+        ? Math.min(TIMINGS.pauseMax, Math.max(TIMINGS.pauseMin, err.retryAfter))
+        : Math.min(TIMINGS.pauseNoRetryAfter, TIMINGS.pauseMin * 2 ** Math.min(failures - 1, 10));
+    const kind = err.kind === 'rate' ? 'rate' : 'server';
+    this.pause = { due: this.monotonic() + wait, failures, kind };
+    this.memory.pause = { until: this.now() + wait, failures, kind };
     await this.saveMemory();
     this.logger.warn(`SOMA Connect: ${reasonOf(err).en}, paused for ${age(wait)}`);
   }
@@ -593,14 +646,14 @@ export class SomaApp {
    * unless that one began before a command of this shade left (it would show
    * the shade before it): then it runs after it.
    */
-  readShade(shade, generation, withBattery = false) {
-    if (shade.reading && shade.readingSince > shade.lastSentAt && !withBattery) {
+  readShade(shade, generation, { withBattery = false, followUp = false } = {}) {
+    if (shade.reading && shade.readingSince > shade.lastSentAt && !withBattery && !followUp) {
       return shade.reading;
     }
     const previous = shade.reading ?? Promise.resolve();
     const run = previous
       .catch(() => {})
-      .then(() => this.readShadeNow(shade, generation, withBattery));
+      .then(() => this.readShadeNow(shade, generation, withBattery, followUp));
     shade.reading = run;
     shade.readingSince = this.monotonic();
     run
@@ -613,7 +666,7 @@ export class SomaApp {
     return run;
   }
 
-  async readShadeNow(shade, generation, withBattery) {
+  async readShadeNow(shade, generation, withBattery, followUp) {
     const address = this.config.address;
     if (generation !== this.generation || !address) {
       return;
@@ -633,7 +686,7 @@ export class SomaApp {
     if (generation !== this.generation) {
       return;
     }
-    this.applyState(shade, json, startedAt);
+    this.applyState(shade, json, startedAt, followUp);
     const mono = this.monotonic();
     if (withBattery && mono >= shade.batteryAt + TIMINGS.batteryEvery) {
       shade.batteryAt = mono;
@@ -657,10 +710,18 @@ export class SomaApp {
     }
   }
 
+  /**
+   * A read of one shade failed: that shade only is "not read" (a 5xx on one
+   * shade never holds the others); a 429 pauses the bridge; a read cut for a
+   * stop changes nothing (the follow-up reads of the stop read it again).
+   */
   async shadeFailed(shade, err) {
+    if (err?.kind === 'cut') {
+      return;
+    }
     shade.online = false;
     shade.reason = reasonOf(err);
-    if (PAUSE_KINDS.has(err?.kind)) {
+    if (err?.kind === 'rate') {
       this.bridge.reason = shade.reason;
       await this.startPause(err);
     }
@@ -672,7 +733,7 @@ export class SomaApp {
    * position before it is "not applied yet". After a stop, a position that
    * still changes between two reads sends the stop again.
    */
-  applyState(shade, json, startedAt) {
+  applyState(shade, json, startedAt, followUp = false) {
     if (startedAt <= shade.lastSentAt) {
       this.logger.debug('Read begun before a command, position not applied');
       return;
@@ -694,6 +755,10 @@ export class SomaApp {
         shade.before = undefined;
         shade.unconfirmed = false;
         shade.notReached = undefined;
+        shade.concludeNext = false;
+      } else if (shade.concludeNext) {
+        // The follow-up reads ended without a fresh read: this one concludes.
+        this.conclude(shade);
       }
     } else {
       shade.unconfirmed = false;
@@ -701,12 +766,27 @@ export class SomaApp {
         shade.notReached = undefined;
       }
     }
+    // After a stop, only the follow-up reads of its first seconds check it:
+    // the shade still going the way it went is stopped again; two equal reads
+    // (it stopped) or a move the other way (someone moves it from the app or
+    // a remote) end the check. A read of the cycle never sends a stop.
     const watch = shade.stopWatch;
-    if (watch) {
-      if (watch.lastPos !== undefined && Math.abs(watch.lastPos - position) > tolerance) {
-        this.stopContradicted(shade, watch);
+    if (watch && followUp) {
+      if (shade.readAt > watch.until) {
+        shade.stopWatch = undefined;
+      } else if (watch.lastPos !== undefined) {
+        const moved = position - watch.lastPos;
+        if (Math.abs(moved) <= tolerance) {
+          shade.stopWatch = undefined;
+        } else if (watch.direction === 0 || Math.sign(moved) === watch.direction) {
+          watch.lastPos = position;
+          this.stopContradicted(shade, watch);
+        } else {
+          shade.stopWatch = undefined;
+        }
+      } else {
+        watch.lastPos = position;
       }
-      watch.lastPos = position;
     }
   }
 
@@ -726,37 +806,41 @@ export class SomaApp {
       .catch(() => {});
   }
 
-  /** The stops kept are sent again (each with its own 3.5 s), 3 times at most. */
-  async resendStops(generation) {
-    for (const shade of this.shades.values()) {
-      const pending = shade.pendingStop;
-      if (!pending || pending.given || generation !== this.generation) {
-        continue;
-      }
-      if (shade.acceptedSeq > pending.seq) {
-        await this.dropStop(shade);
-        continue;
-      }
-      pending.resends += 1;
-      const result = await this.sendStop(shade, pending.seq, this.monotonic());
-      if (result.ok || result.skipped) {
-        this.logger.info(`${nameOf(shade)}: stop kept, sent again`);
-        await this.dropStop(shade);
-        if (result.ok) {
-          this.watchStop(shade, pending.seq);
+  /**
+   * The stops kept are sent again side by side (each with its own 3.5 s), 3
+   * times at most, to the address of the configuration or, before it is read,
+   * the one kept in /data; /data written once for the round.
+   */
+  async resendStops() {
+    const round = [...this.shades.values()].filter((s) => s.pendingStop && !s.pendingStop.given);
+    await Promise.all(
+      round.map(async (shade) => {
+        const pending = shade.pendingStop;
+        if (shade.acceptedSeq > pending.seq) {
+          shade.pendingStop = undefined;
+          return;
         }
-        continue;
-      }
-      if (pending.resends >= LIMITS.stopResends) {
-        pending.given = true;
-        this.logger.warn(`${nameOf(shade)}: stop given up after ${pending.resends} tries`);
-        this.memory.stops = this.memory.stops.filter((s) => s.mac !== shade.mac);
-      } else {
-        this.memory.stops = [
-          ...this.memory.stops.filter((s) => s.mac !== shade.mac),
-          { mac: shade.mac, at: pending.at, resends: pending.resends },
-        ];
-      }
+        pending.resends += 1;
+        const result = await this.sendStop(shade, pending.seq, this.monotonic());
+        if (shade.pendingStop !== pending) {
+          return;
+        }
+        if (result.ok || result.skipped) {
+          this.logger.info(`${nameOf(shade)}: stop kept, sent again`);
+          shade.pendingStop = undefined;
+          if (result.ok) {
+            this.watchStop(shade, pending.seq, 0);
+          }
+        } else if (pending.resends >= LIMITS.stopResends) {
+          pending.given = true;
+          this.logger.warn(`${nameOf(shade)}: stop given up after ${pending.resends} tries`);
+        }
+      }),
+    );
+    if (round.length > 0) {
+      this.memory.stops = [...this.shades.values()]
+        .filter((s) => s.pendingStop && !s.pendingStop.given)
+        .map((s) => ({ mac: s.mac, at: s.pendingStop.at, resends: s.pendingStop.resends }));
       await this.saveMemory();
     }
   }
@@ -773,12 +857,10 @@ export class SomaApp {
       { mac: shade.mac, at: shade.pendingStop.at, resends },
     ];
     this.logger.warn(`${nameOf(shade)}: stop not through (${reasonOf(err).en}), kept`);
-    // Its own 3.5 s of tries count as a round: the next one comes with the reads.
+    // Its own 3.5 s of tries count as a round: the next one comes a minute later.
     this.lastStopRound = this.monotonic();
     await this.saveMemory();
-    if (!this.busy) {
-      this.schedule();
-    }
+    this.scheduleStops();
   }
 
   async dropStop(shade) {
@@ -833,7 +915,10 @@ export class SomaApp {
     let head;
     const pause = this.pauseLeft(mono);
     if (pause > 0) {
-      head = T.paused(key, this.bridge.reason ?? reasonOf({ kind: 'rate' }), age(pause));
+      head =
+        this.pause.kind === 'rate'
+          ? T.paused(key, age(pause))
+          : T.bridgeError(key, this.bridge.reason ?? reasonOf({ kind: 'server' }), age(pause));
     } else if (this.bridge.online === true) {
       const count = [...this.shades.values()].filter((s) => s.listed === true).length;
       head = T.bridgeOk(key, this.version, count, config.pollInterval);
@@ -1159,7 +1244,7 @@ export class SomaApp {
         return { kind: 'move', position: 100 };
       }
       if (v === COVER_STATE.CLOSE) {
-        return { kind: 'move', position: 0 };
+        return { kind: 'close', position: 0 };
       }
       throw this.refusal(ERRORS.badValue);
     }
@@ -1167,7 +1252,8 @@ export class SomaApp {
     if (v === undefined) {
       throw this.refusal(ERRORS.badValue);
     }
-    return { kind: 'move', position: Math.round(v) };
+    const position = Math.round(v);
+    return { kind: position === 0 ? 'close' : 'move', position };
   }
 
   async setValue(_device, feature, value) {
@@ -1181,6 +1267,9 @@ export class SomaApp {
     if (plan.kind === 'stop') {
       return this.stopNow(target.id, received);
     }
+    if (plan.kind === 'close') {
+      return this.closeNow(target.id, received);
+    }
     if (!this.loaded) {
       throw this.refusal(ERRORS.notLoaded);
     }
@@ -1193,7 +1282,7 @@ export class SomaApp {
     }
     const pause = this.pauseLeft(received);
     if (pause > 0) {
-      throw this.refusal(ERRORS.paused(age(pause)));
+      throw this.refusal(this.pauseRefusal(pause));
     }
     this.commandSeq += 1;
     const ticket = { seq: this.commandSeq, plan, generation: this.generation, cancelled: false };
@@ -1210,6 +1299,11 @@ export class SomaApp {
     }
   }
 
+  /** Why a move waits: a 429 (asked to slow down) or an error of SOMA Connect. */
+  pauseRefusal(pause) {
+    return this.pause?.kind === 'rate' ? ERRORS.paused(age(pause)) : ERRORS.bridgeError(age(pause));
+  }
+
   /** The checks of a move: on arrival in the lane and right before its first byte. */
   checkMove(shade, ticket, sendBy) {
     const mono = this.monotonic();
@@ -1221,7 +1315,7 @@ export class SomaApp {
     }
     const pause = this.pauseLeft(mono);
     if (pause > 0) {
-      throw this.refusal(ERRORS.paused(age(pause)));
+      throw this.refusal(this.pauseRefusal(pause));
     }
     if (mono > sendBy) {
       throw this.refusal(ERRORS.tooSlow);
@@ -1295,6 +1389,7 @@ export class SomaApp {
     shade.target = ticket.plan.position;
     shade.before = before;
     shade.notReached = undefined;
+    shade.concludeNext = false;
     this.followUp(shade, ticket.generation);
     this.publishAll().catch(() => {});
   }
@@ -1309,7 +1404,7 @@ export class SomaApp {
     if (ticket.generation !== this.generation) {
       return this.refusal(err.answered ? ERRORS.refused(reason) : ERRORS.sentUnconfirmed(reason));
     }
-    if (PAUSE_KINDS.has(err?.kind)) {
+    if (err?.kind === 'rate') {
       await this.startPause(err);
     }
     if (err.answered) {
@@ -1342,7 +1437,12 @@ export class SomaApp {
     this.commandSeq += 1;
     const seq = this.commandSeq;
     shade.stopSeq = seq;
+    // The way the shade went (Gladys: +1 opening, -1 closing, 0 unknown).
+    const from = shade.before ?? shade.position;
+    const direction =
+      shade.target === undefined || from === undefined ? 0 : Math.sign(shade.target - from);
     shade.target = undefined;
+    shade.concludeNext = false;
     shade.before = undefined;
     shade.notReached = undefined;
     const address = this.config.address ?? this.address;
@@ -1362,7 +1462,7 @@ export class SomaApp {
       if (shade.pendingStop) {
         await this.dropStop(shade);
       }
-      this.watchStop(shade, seq);
+      this.watchStop(shade, seq, direction);
       return;
     }
     await this.keepStop(shade, seq, result.err);
@@ -1374,9 +1474,15 @@ export class SomaApp {
     throw this.refusal(ERRORS.stopNotSent(reasonOf(err)));
   }
 
-  /** The reads that check a stop: a shade still moving gets the stop again. */
-  watchStop(shade, seq) {
-    shade.stopWatch = { seq, lastPos: undefined, resends: 0 };
+  /** The reads of the first seconds after a stop check it (see applyState). */
+  watchStop(shade, seq, direction) {
+    shade.stopWatch = {
+      seq,
+      direction,
+      lastPos: undefined,
+      resends: 0,
+      until: this.monotonic() + TIMINGS.stopWatchFor,
+    };
     this.followUp(shade, this.generation);
   }
 
@@ -1387,11 +1493,23 @@ export class SomaApp {
    * of that shade newer than this stop was accepted meanwhile.
    * @returns {Promise<{ ok?: true, skipped?: true, err?: Error }>}
    */
-  async sendStop(shade, seq, received) {
+  sendStop(shade, seq, received) {
+    const address = this.config.address ?? this.address;
+    return this.sendProtective(shade, {
+      received,
+      newer: () => shade.acceptedSeq > seq,
+      request: (options) => this.client.stop(address, shade.mac, styleOf(this.version), options),
+    });
+  }
+
+  /**
+   * A protective request (stop, close): a read silent for a second is cut
+   * first, then the request, tried again every 250 ms within 3.5 s of
+   * `received` while nothing reached the motor; skipped once `newer()`.
+   */
+  async sendProtective(shade, { received, newer, request }) {
     const sendBy = received + TIMINGS.commandSendBy;
     const answerBy = received + TIMINGS.commandAnswerBy;
-    const address = this.config.address ?? this.address;
-    const newer = () => shade.acceptedSeq > seq;
     if (this.client.reads.size > 0) {
       await this.client.cutStalled(TIMINGS.stalledAfter, TIMINGS.closeWait, this.timers);
     }
@@ -1405,12 +1523,12 @@ export class SomaApp {
         return { err: lastErr ?? { kind: 'late' } };
       }
       try {
-        await this.client.stop(address, shade.mac, styleOf(this.version), {
+        await request({
           timeout: Math.max(200, answerBy - mono),
           sendWithin: sendBy - mono,
           beforeSend: () => {
             if (newer()) {
-              const skipped = new Error('a newer move was accepted');
+              const skipped = new Error('a newer command went first');
               skipped.skipped = true;
               throw skipped;
             }
@@ -1480,7 +1598,7 @@ export class SomaApp {
         const read =
           this.pauseLeft(this.monotonic()) > 0
             ? Promise.resolve()
-            : this.readShade(shade, generation);
+            : this.readShade(shade, generation, { followUp: index < 2 });
         read
           .then(async () => {
             if (generation !== this.generation) {
@@ -1497,21 +1615,112 @@ export class SomaApp {
     });
   }
 
-  /** The travel is over: a position asked and never read is "not reached". */
+  /**
+   * The travel is over: a position asked and not read is "not reached", on a
+   * read made after the command only; without one (a pause, the shade not
+   * read), "not confirmed" until the next read, which concludes.
+   */
   conclude(shade) {
     shade.stopWatch = undefined;
     if (shade.target === undefined) {
       return;
     }
-    if (shade.position !== undefined && shade.online === true) {
-      shade.notReached = { target: shade.target, read: shade.position };
-      shade.unconfirmed = false;
-      this.logger.warn(
-        `${nameOf(shade)}: did not reach ${shade.target} % (read ${shade.position} %)`,
-      );
+    this.badges = undefined;
+    if (
+      shade.position === undefined ||
+      shade.online !== true ||
+      shade.readAt === undefined ||
+      shade.readAt <= shade.lastSentAt
+    ) {
+      shade.unconfirmed = true;
+      shade.concludeNext = true;
+      return;
     }
+    shade.notReached = { target: shade.target, read: shade.position };
+    shade.unconfirmed = false;
+    shade.concludeNext = false;
+    this.logger.warn(
+      `${nameOf(shade)}: did not reach ${shade.target} % (read ${shade.position} %)`,
+    );
     shade.target = undefined;
     shade.before = undefined;
-    this.badges = undefined;
+  }
+
+  /**
+   * CLOSE: protective like a stop: no lane, no read, no option, through a
+   * pause, before the configuration is read (address and shade of /data); it
+   * replaces the moves of that shade not sent yet. Tried again every 250 ms
+   * within 3.5 s, never kept nor sent again by itself (after a restart
+   * neither). A newer stop (or a newer move accepted) cancels it.
+   */
+  async closeNow(id, received) {
+    const shade = this.shades.get(id);
+    if (!shade || shade.listed === false) {
+      throw this.refusal(ERRORS.unknownDevice);
+    }
+    const address = this.config.address ?? this.address;
+    if (!address) {
+      throw this.refusal(ERRORS.noAddress);
+    }
+    for (const pending of shade.tickets) {
+      pending.cancelled = true;
+    }
+    this.commandSeq += 1;
+    const ticket = {
+      seq: this.commandSeq,
+      plan: { kind: 'close', position: 0 },
+      generation: this.generation,
+    };
+    const leaving = shade.inFlight;
+    const before = shade.position;
+    const result = await this.sendClose(shade, ticket, address, received);
+    if (leaving) {
+      // A move was leaving: once it is answered, close again (unless newer).
+      Promise.resolve(leaving)
+        .catch(() => {})
+        .then(async () => {
+          const again = await this.sendClose(shade, ticket, address, this.monotonic());
+          if (again.ok) {
+            this.moveAccepted(shade, ticket, before, true);
+          }
+        })
+        .catch(() => {});
+    }
+    if (result.skipped) {
+      throw this.refusal(shade.stopSeq > ticket.seq ? ERRORS.stopped : ERRORS.superseded);
+    }
+    if (result.ok) {
+      this.logger.info(`${nameOf(shade)}: close accepted`);
+      this.moveAccepted(shade, ticket, before, true);
+      return;
+    }
+    const err = result.err;
+    const reason = reasonOf(err);
+    if (err?.kind === 'rate') {
+      await this.startPause(err);
+    }
+    if (err?.sent && !err?.answered) {
+      shade.unconfirmed = true;
+      this.moveAccepted(shade, ticket, before, false);
+      this.logger.warn(`${nameOf(shade)}: close sent, NOT confirmed (${reason.en})`);
+      throw this.refusal(ERRORS.sentUnconfirmed(reason));
+    }
+    this.logger.warn(`${nameOf(shade)}: close NOT sent (${reason.en})`);
+    throw this.refusal(err?.answered ? ERRORS.refused(reason) : ERRORS.notSent(reason));
+  }
+
+  sendClose(shade, ticket, address, received) {
+    return this.sendProtective(shade, {
+      received,
+      newer: () => shade.stopSeq > ticket.seq || shade.acceptedSeq > ticket.seq,
+      request: (options) =>
+        this.client.setPosition(address, shade.mac, apiPositionFor(0), styleOf(this.version), {
+          ...options,
+          beforeSend: () => {
+            options.beforeSend();
+            shade.lastSentAt = this.monotonic();
+          },
+        }),
+    });
   }
 }

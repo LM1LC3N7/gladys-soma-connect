@@ -48,7 +48,7 @@ test('the store basics, and one version in the four places', () => {
     'https://raw.githubusercontent.com/LM1LC3N7/gladys-soma-connect/main/cover.png',
   );
   assert.deepEqual(manifest.transports, ['local']);
-  assert.deepEqual(manifest.categories, ['appliances']);
+  assert.deepEqual(manifest.categories, ['lighting']);
   // keywords and countries need gladys_version >= 5.3.0: not yet (TODO.md).
   assert.equal(manifest.keywords, undefined);
   assert.equal(manifest.countries, undefined);

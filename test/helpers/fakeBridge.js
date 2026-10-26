@@ -23,8 +23,8 @@ const json = (value, status = 200) => ({
 });
 
 /** The request name, the MAC and the position of a path, in the form of `version`. */
-export function route(path, version) {
-  const query = Number(String(version).split('.')[0]) >= 3;
+export function route(path, version, form) {
+  const query = form ? form === 'query' : Number(String(version).split('.')[0]) >= 3;
   const url = new URL(path, 'http://x');
   const parts = url.pathname.split('/').filter(Boolean);
   if (parts[0] === 'list_devices') {
@@ -47,6 +47,8 @@ export function createBridge(clock, { version = '2.3.1', shades } = {}) {
     failures: [],
     latency: 0,
     down: false,
+    /** The URL form it takes ('query' | 'path'); by default query from firmware 3. */
+    form: undefined,
     listExtra: [],
   };
   const list = shades ?? [
@@ -112,7 +114,7 @@ export function createBridge(clock, { version = '2.3.1', shades } = {}) {
   }
 
   bridge.request = async (options) => {
-    const r = route(options.path, bridge.version);
+    const r = route(options.path, bridge.version, bridge.form);
     const failure = bridge.failures.find((f) => f.times > 0 && f.match(r, options.path));
     if (failure) {
       failure.times -= 1;

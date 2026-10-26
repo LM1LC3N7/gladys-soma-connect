@@ -238,22 +238,53 @@ test('a read answering is not cut by a stop', async () => {
   assert.equal(app.client.reads.size, 1);
 });
 
-test('a stop contradicted by the reads (the shade still moves) is sent again', async () => {
+test('a stop the follow-up reads contradict (still going the same way) is sent again, once', async () => {
+  const clock = createClock();
+  const bridge = createBridge(clock);
+  bridge.shades.get(MAC_A).frozen = true;
+  const { setValue } = await setup({ clock, bridge, devices: createdBoth() });
+  // Closing (70 -> 0), then a stop.
+  assert.equal((await setValue(ID_A, 'position', 0)).success, true);
+  assert.equal((await setValue(ID_A, 'state', 0)).success, true);
+  bridge.shades.get(MAC_A).position = 40; // read at 2 s: Gladys 60
+  await clock.run(2 * SECOND);
+  bridge.shades.get(MAC_A).position = 50; // read at 5 s: Gladys 50, still closing
+  await clock.run(3 * SECOND);
+  assert.equal(bridge.of('stop_shade').length, 2);
+  // The cycle reads never send a stop, even with the shade moving.
+  for (const p of [60, 70, 80]) {
+    bridge.shades.get(MAC_A).position = p;
+    await clock.run(30 * SECOND);
+  }
+  assert.equal(bridge.of('stop_shade').length, 2);
+});
+
+test('a move from the app or a remote after a stop is never stopped by Gladys', async () => {
   const clock = createClock();
   const bridge = createBridge(clock);
   const { setValue } = await setup({ clock, bridge, devices: createdBoth() });
-  const ack = await setValue(ID_A, 'state', 0);
-  assert.equal(ack.success, true);
-  await clock.run(2 * SECOND);
-  bridge.shades.get(MAC_A).position = 50;
-  await clock.run(3 * SECOND);
-  assert.equal(bridge.of('stop_shade').length, 2);
-  // Still: a third, a fourth, then no more (3 resends at most).
-  for (const p of [60, 70, 80]) {
+  assert.equal((await setValue(ID_A, 'state', 0)).success, true);
+  await clock.run(10 * SECOND);
+  // The user opens it from the SOMA app.
+  for (const p of [20, 10, 0]) {
     bridge.shades.get(MAC_A).position = p;
-    await clock.run(25 * SECOND);
+    await clock.run(20 * SECOND);
   }
-  assert.equal(bridge.of('stop_shade').length, 4);
+  assert.equal(bridge.of('stop_shade').length, 1);
+});
+
+test('after a stop, two equal reads or a move the other way end the check', async () => {
+  const clock = createClock();
+  const bridge = createBridge(clock);
+  bridge.shades.get(MAC_A).frozen = true;
+  const { setValue } = await setup({ clock, bridge, devices: createdBoth() });
+  assert.equal((await setValue(ID_A, 'position', 0)).success, true);
+  assert.equal((await setValue(ID_A, 'state', 0)).success, true);
+  bridge.shades.get(MAC_A).position = 40;
+  await clock.run(2 * SECOND);
+  bridge.shades.get(MAC_A).position = 10; // opening: someone else moves it
+  await clock.run(3 * SECOND);
+  assert.equal(bridge.of('stop_shade').length, 1);
 });
 
 test('a stop that may have left (no answer) says so and is kept for the next read', async () => {

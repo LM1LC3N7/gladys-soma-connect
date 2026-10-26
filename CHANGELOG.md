@@ -28,6 +28,25 @@ the notes of the version's GitHub Release.
 - Reads never sooner than the interval (also after a restart), the battery at
   most once an hour; pauses after a 429 or a 5xx; the configuration of Gladys
   read again while it fails.
+- Close (and the position 0 %) is protective like stop: through a pause,
+  before the configuration is read, never refused by a full queue.
 - Documentation in English and French.
+
+### Fixed
+
+- A move started from the SOMA app or a remote after a stop is no longer
+  stopped by Gladys: only the reads 2 and 5 s after a stop check it.
+- An error 5xx on one shade no longer pauses the moves of all the shades; a
+  pause without Retry-After holds the moves 5 min at most, and says its cause.
+- A stop kept in `/data` leaves at the start even when the configuration of
+  Gladys cannot be read.
+- Both URL forms are tried after a 404 whatever the firmware says, and the one
+  that answered is kept (firmware 4 on the path form, as pysoma expects).
+- A read cut to give the way to a stop no longer marks SOMA Connect
+  unreachable.
+- The store category is `lighting` (shutters and blinds).
+- A decimal position is rounded instead of taken as a wrong answer; the
+  follow-up reads conclude "not reached" on a fresh read only; the reads of
+  SOMA Connect are 4 at a time at most.
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-soma-connect/commits/main

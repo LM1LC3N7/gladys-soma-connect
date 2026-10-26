@@ -1,67 +1,99 @@
-# Template de démonstration
+# SOMA Connect
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Pilotez vos **SOMA Smart Shades** (moteurs de stores enrouleurs) et **SOMA
+Tilt** (moteurs de stores vénitiens) depuis Gladys, par l'API HTTP locale de
+votre pont **SOMA Connect**.
 
-## Ce que vous obtenez
+> Intégration non officielle, sans lien avec SOMA (Wazombi Labs). Elle n'a
+> **jamais été testée avec un vrai SOMA Connect** : elle suit l'API utilisée
+> par pysoma, la bibliothèque du fabricant. Vos retours sont les bienvenus.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+## Fonctionnement
 
-## Configuration
+- Gladys ne parle qu'en **HTTP** à SOMA Connect, sur votre réseau local (port
+  3000). Le lien Bluetooth vers les stores reste dans SOMA Connect : Gladys n'a
+  pas besoin de Bluetooth. Pas de compte, pas de cloud.
+- Chaque appareil listé par SOMA Connect devient un **volet** dans l'onglet
+  Découverte, avec :
+  - **Ouverture / fermeture** : ouvrir, fermer et **arrêter** ;
+  - **Position** : de 0 % (fermé) à 100 % (ouvert) ;
+  - **Batterie** (%), lue au plus une fois par heure (chaque lecture réveille
+    le store).
+- Un **Tilt** oriente les lames : 100 % = lames à plat (ouvert), 0 % = fermé
+  vers le bas. Un Tilt fermé vers le haut (depuis l'application SOMA) se lit
+  fermé ; Gladys ne ferme que vers le bas.
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+## Mise en route
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+1. Appairez vos stores à SOMA Connect dans l'application SOMA, et vérifiez que
+   SOMA Connect est sur votre réseau.
+2. Donnez à SOMA Connect une adresse fixe dans votre box (réservation DHCP).
+3. Dans Gladys, saisissez son **adresse IP** (port 3000 par défaut ; un autre
+   port : `192.168.1.50:3001`) et enregistrez. Appuyez sur **Tester la
+   connexion**.
+4. Dans l'onglet **Découverte**, ajoutez les stores.
 
-## Actions
+## Commandes
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+- **Ouvrir, fermer et la position** partent vers SOMA Connect dans les 3,5 s
+  de votre clic, ou sont refusées sans rien envoyer. Chaque store prend ses
+  mouvements un par un (4 en attente au plus) ; des stores différents bougent
+  côte à côte, une scène peut donc bouger tous vos stores d'un coup.
+- L'accusé de réception dit que **SOMA Connect a accepté** la commande. La
+  position n'est **confirmée** que par une lecture qui la montre (à 2 % près) :
+  le store est relu 2, 5, 20, 45 et 90 s après une commande. Un store qui n'a
+  pas atteint sa position après la dernière lecture reçoit un badge
+  d'avertissement et une ligne dans le statut.
+- Une commande qui a pu atteindre SOMA Connect sans réponse est annoncée
+  « envoyée, sans confirmation », et non « non envoyée ».
 
-## Scènes
+### Arrêt
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+L'arrêt passe devant : il ne prend aucune file, n'attend aucune lecture, ne
+dépend d'aucune option, et passe à travers une pause demandée par SOMA Connect
+et l'espacement des essais après une panne. Il fonctionne dès le redémarrage,
+avant toute lecture (l'adresse, le micrologiciel et les stores sont gardés
+dans `/data`). Il annule les mouvements de ce store pas encore partis : un
+mouvement demandé avant un arrêt ne part pas après lui. Une lecture muette
+depuis une seconde est coupée pour lui laisser la place.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+Un arrêt est refusé, ou ne part pas, dans ces cas seulement :
 
-## Tableau de bord
+- le store est inconnu de l'intégration (jamais listé par SOMA Connect, et pas
+  gardé dans `/data`), ou aucune adresse de SOMA Connect n'est saisie ni
+  gardée ;
+- un mouvement de ce store demandé **après** l'arrêt a été accepté par SOMA
+  Connect entre-temps (c'est ce mouvement que vous avez demandé en dernier) ;
+- SOMA Connect est injoignable, ou répond une erreur, pendant 3,5 s (essai
+  toutes les 250 ms) : l'arrêt est alors **gardé** (aussi dans `/data`) et
+  renvoyé avec les lectures suivantes (au moins une fois par minute), 3 fois
+  au plus ; le statut et le badge le disent, et disent quand il est abandonné.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Si les lectures après un arrêt montrent que le store bouge encore, l'arrêt
+est renvoyé (3 fois au plus).
 
-## Dépannage
+## Lectures
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+- À chaque intervalle (60 s par défaut, de 30 à 3600 s) : la liste des
+  appareils, puis la position de chaque store. Pas plus souvent que
+  l'intervalle, sauf les lectures après une commande, même après un
+  redémarrage, une reconnexion ou le bouton de test.
+- Un store hors de portée Bluetooth de SOMA Connect est affiché « non lu » et
+  son badge injoignable ; les autres continuent.
+- SOMA Connect injoignable : nouvel essai après 30 s, 1, 2 puis 5 min (pas
+  plus souvent que l'intervalle). Un « trop de demandes » (HTTP 429) ou une
+  erreur 5xx met en pause les lectures et les mouvements (de 1 min à 6 h,
+  gardée dans `/data`) ; la pause ne retient pas l'arrêt.
+- Une position n'est publiée que tant qu'elle est récente ; rien d'ancien
+  n'est republié comme neuf.
+
+## Limites
+
+- Un seul SOMA Connect, 32 appareils au plus.
+- Le niveau de lumière du panneau solaire n'est pas encore lu (son unité n'est
+  pas connue).
+- Le type d'un appareil (store ou Tilt) changé dans SOMA Connect s'applique
+  après un **Scan** dans l'onglet Découverte.
+- Jamais testée avec un vrai SOMA Connect : la forme des adresses du
+  micrologiciel 3 et suivants, les réponses et le temps de réponse de SOMA
+  Connect restent à vérifier.

@@ -1,6 +1,6 @@
 {
   "name": "gladys-soma-connect",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for SOMA Smart Shades and Tilt, through the local HTTP API of SOMA Connect. Unofficial, not affiliated with SOMA (Wazombi Labs).",
   "type": "module",

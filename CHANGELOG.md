@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-26
+
 ### Added
 
 - SOMA Smart Shades and SOMA Tilt through the local HTTP API of SOMA Connect
@@ -53,4 +55,5 @@ the notes of the version's GitHub Release.
   follow-up reads conclude "not reached" on a fresh read only; the reads of
   SOMA Connect are 4 at a time at most.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-soma-connect/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-soma-connect/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-soma-connect/releases/tag/v0.1.1

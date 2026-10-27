@@ -3,7 +3,7 @@
 // real local HTTP server playing SOMA Connect: the reads really start, at 0,
 // the interval and twice the interval, with a bounded number of timers; a
 // stop refused by SOMA Connect is really tried again every 250 ms. The time
-// is sped up 100 times (the 30 s interval is 300 ms) but it is the real
+// is sped up 20 times (the 30 s interval is 1.5 s) but it is the real
 // clock: it moves between any two reads of it.
 // -----------------------------------------------------------------------------
 
@@ -18,7 +18,7 @@ import { SomaClient } from '../src/soma/client.js';
 import { httpGet } from '../src/soma/http.js';
 import { memoryStore } from '../src/store.js';
 
-const SPEED = 100;
+const SPEED = 20;
 const INTERVAL = POLL_INTERVAL.min * 1000;
 const MAC = 'e3:aa:00:00:00:01';
 const quiet = () => {};

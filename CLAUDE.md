@@ -66,7 +66,7 @@ test/                             node --test: SDK fake Gladys, fake SOMA Connec
   exactly: keep them true when changing the code.
 - One reading of the clock per decision (`dueAt(mono)`), pacing on the
   monotonic clock; the tests use a clock that moves at every read, plus
-  `test/realclock.test.js` (real time ×100).
+  `test/realclock.test.js` (real time ×20).
 - Sent within 3.5 s or refused; a request that may have left is never told
   "not sent"; the ack never waits for a publication to Gladys.
 - Never read sooner than the interval except the reads after a command.

@@ -59,8 +59,11 @@ up to date at the end of every milestone.
 - **Version 0.1.0 set by hand** in `package.json`, `package-lock.json`, the
   manifest and the `docker_image` tag (`ghcr.io/lm1lc3n7/gladys-soma-connect:0.1.0`):
   the first patch release gives 0.1.1.
-- **SDK `^0.15.0`**: 0.16.0 is not published on npm yet (checked 2026-10-26,
-  `npm view` gives 0.15.0); move to it when it is (migration planned).
+- **SDK `^0.16.0`** (2026-10-27, migration wave 2): 0.16.0 is on npm since
+  2026-10-25 (a stale npm cache said otherwise); it adds the ai, tts and music
+  types; no effect here (`should_poll` explicit, `poll_frequency` unused).
+  `keywords`, `countries` and `gladys_version >= 5.3.0` wait until Gladys 5.3
+  is widespread.
 - **pysoma (MIT, Wazombi Labs OÜ, the maker)** is ported, not run (Python);
   the meaning of the positions and the battery reading come from the Home
   Assistant `soma` integration (Apache-2.0). Both credited in
